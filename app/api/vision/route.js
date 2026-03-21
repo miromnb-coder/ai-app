@@ -1,10 +1,6 @@
 import { NextResponse } from "next/server";
 import { analyzeVisionFrame } from "../../../lib/vision";
-import {
-  getSessionState,
-  mergeMemory,
-  updateSessionState,
-} from "../../../lib/sessionStore";
+import { getSessionState, mergeMemory, updateSessionState } from "../../../lib/sessionStore";
 
 export async function POST(req) {
   try {
@@ -13,6 +9,8 @@ export async function POST(req) {
     const image = String(body.image || "");
     const clientMemory = Array.isArray(body.memory) ? body.memory : [];
     const visionContext = String(body.visionContext || "");
+    const visionTask = String(body.visionTask || "describe");
+    const instruction = String(body.instruction || "");
 
     if (!image) {
       return NextResponse.json({ error: "Kuva puuttuu" }, { status: 400 });
@@ -26,6 +24,8 @@ export async function POST(req) {
       image,
       memory,
       visionContext: effectiveVisionContext,
+      visionTask,
+      instruction,
     });
 
     updateSessionState(sessionId, {
