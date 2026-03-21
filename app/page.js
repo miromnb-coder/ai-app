@@ -572,7 +572,7 @@ export default function Page() {
 
   async function analyzeVision({
     force = false,
-    announce = false,
+    announce: true
     visionTask = "describe",
     instruction = "",
   } = {}) {
