@@ -4,19 +4,16 @@ import { useEffect, useMemo, useRef, useState } from "react";
 
 const starterMessage = {
   role: "assistant",
-  content:
-    "Glass Pro Mode on päällä. Sano “Halo” ja anna komento, tai kirjoita viesti.",
+  content: "Vision mode on valmis. Voit puhua minulle tai käynnistää kameran.",
 };
 
 const quickPrompts = [
-  "Halo, muista että tykkään älylaseista",
-  "Halo, laske 48 * 17",
-  "Halo, käännä tämä suomeksi: I want smart glasses with AI",
-  "Halo, anna 3 ideaa älylasisovellukseen",
-  "Halo, mitä muistat minusta?",
+  "Muista tämä: tykkään älylaseista",
+  "Laske 48 * 17",
+  "Käännä tämä suomeksi: I want smart glasses with AI",
+  "Anna 3 ideaa älylasisovellukseen",
+  "Mitä muistat minusta?",
 ];
-
-const WAKE_WORDS = ["halo", "agentti", "assistant"];
 
 function supportsSpeechRecognition() {
   return (
@@ -44,12 +41,11 @@ function speak(text, onStart, onEnd) {
 function stripWakeWord(text) {
   const clean = String(text || "").trim();
   const lower = clean.toLowerCase();
+  const wakeWords = ["halo", "agentti", "assistant"];
 
-  for (const word of WAKE_WORDS) {
-    const prefix = `${word},`;
-    const prefix2 = `${word} `;
-    if (lower.startsWith(prefix)) return clean.slice(prefix.length).trim();
-    if (lower.startsWith(prefix2)) return clean.slice(prefix2.length).trim();
+  for (const word of wakeWords) {
+    if (lower.startsWith(`${word},`)) return clean.slice(word.length + 1).trim();
+    if (lower.startsWith(`${word} `)) return clean.slice(word.length).trim();
     if (lower === word) return "";
   }
 
@@ -59,30 +55,41 @@ function stripWakeWord(text) {
 export default function Page() {
   const [messages, setMessages] = useState([starterMessage]);
   const [input, setInput] = useState("");
+  const [memory, setMemory] = useState([]);
   const [loading, setLoading] = useState(false);
   const [listening, setListening] = useState(false);
   const [speaking, setSpeaking] = useState(false);
   const [status, setStatus] = useState("Valmis");
-  const [memory, setMemory] = useState([]);
   const [autoSpeak, setAutoSpeak] = useState(true);
   const [autoListen, setAutoListen] = useState(true);
-  const [wakeWordMode, setWakeWordMode] = useState(true);
+  const [wakeWordMode, setWakeWordMode] = useState(false);
+  const [visionMode, setVisionMode] = useState(false);
   const [glassMode, setGlassMode] = useState(true);
+  const [liveVision, setLiveVision] = useState("");
+  const [cameraError, setCameraError] = useState("");
 
   const bottomRef = useRef(null);
   const recognitionRef = useRef(null);
+  const cameraStreamRef = useRef(null);
+  const visionTimerRef = useRef(null);
+  const visionBusyRef = useRef(false);
+  const videoRef = useRef(null);
+  const canvasRef = useRef(null);
+  const sendMessageRef = useRef(null);
+  const analyzeVisionRef = useRef(null);
   const listeningRef = useRef(false);
 
   useEffect(() => {
-    const savedMessages = localStorage.getItem("glass-agent-chat");
-    const savedMemory = localStorage.getItem("glass-agent-memory");
-    const savedSettings = localStorage.getItem("glass-agent-settings");
+    const savedMessages = localStorage.getItem("glass-pro-chat");
+    const savedMemory = localStorage.getItem("glass-pro-memory");
+    const savedSettings = localStorage.getItem("glass-pro-settings");
+    const savedVision = localStorage.getItem("glass-pro-vision");
 
     if (savedMessages) {
       try {
         setMessages(JSON.parse(savedMessages));
       } catch {
-        localStorage.removeItem("glass-agent-chat");
+        localStorage.removeItem("glass-pro-chat");
       }
     }
 
@@ -90,7 +97,7 @@ export default function Page() {
       try {
         setMemory(JSON.parse(savedMemory));
       } catch {
-        localStorage.removeItem("glass-agent-memory");
+        localStorage.removeItem("glass-pro-memory");
       }
     }
 
@@ -100,28 +107,45 @@ export default function Page() {
         if (typeof parsed.autoSpeak === "boolean") setAutoSpeak(parsed.autoSpeak);
         if (typeof parsed.autoListen === "boolean") setAutoListen(parsed.autoListen);
         if (typeof parsed.wakeWordMode === "boolean") setWakeWordMode(parsed.wakeWordMode);
+        if (typeof parsed.visionMode === "boolean") setVisionMode(parsed.visionMode);
         if (typeof parsed.glassMode === "boolean") setGlassMode(parsed.glassMode);
       } catch {
-        localStorage.removeItem("glass-agent-settings");
+        localStorage.removeItem("glass-pro-settings");
       }
+    }
+
+    if (savedVision) {
+      setLiveVision(savedVision);
     }
   }, []);
 
   useEffect(() => {
-    localStorage.setItem("glass-agent-chat", JSON.stringify(messages));
+    localStorage.setItem("glass-pro-chat", JSON.stringify(messages));
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages]);
 
   useEffect(() => {
-    localStorage.setItem(
-      "glass-agent-settings",
-      JSON.stringify({ autoSpeak, autoListen, wakeWordMode, glassMode })
-    );
-  }, [autoSpeak, autoListen, wakeWordMode, glassMode]);
+    localStorage.setItem("glass-pro-memory", JSON.stringify(memory));
+  }, [memory]);
 
   useEffect(() => {
-    localStorage.setItem("glass-agent-memory", JSON.stringify(memory));
-  }, [memory]);
+    localStorage.setItem(
+      "glass-pro-settings",
+      JSON.stringify({ autoSpeak, autoListen, wakeWordMode, visionMode, glassMode })
+    );
+  }, [autoSpeak, autoListen, wakeWordMode, visionMode, glassMode]);
+
+  useEffect(() => {
+    localStorage.setItem("glass-pro-vision", liveVision);
+  }, [liveVision]);
+
+  useEffect(() => {
+    sendMessageRef.current = sendMessage;
+  });
+
+  useEffect(() => {
+    analyzeVisionRef.current = analyzeVision;
+  });
 
   useEffect(() => {
     if (!supportsSpeechRecognition()) return;
@@ -166,41 +190,128 @@ export default function Page() {
 
     recognition.onresult = (event) => {
       const transcript = event.results?.[0]?.[0]?.transcript || "";
-      const clean = transcript.trim();
+      const clean = String(transcript).trim();
       if (!clean) return;
-
-      const stripped = wakeWordMode ? stripWakeWord(clean) : clean;
 
       if (wakeWordMode) {
         const lower = clean.toLowerCase();
-        const hasWakeWord = WAKE_WORDS.some((word) => lower.includes(word));
+        const hasWakeWord = ["halo", "agentti", "assistant"].some((word) =>
+          lower.includes(word)
+        );
 
-        if (!hasWakeWord) {
-          setInput(clean);
-          return;
-        }
+        if (!hasWakeWord) return;
 
-        if (stripped) {
-          sendMessage(stripped);
-        }
+        const stripped = stripWakeWord(clean);
+        if (stripped) sendMessageRef.current?.(stripped);
         return;
       }
 
-      sendMessage(stripped);
+      sendMessageRef.current?.(clean);
     };
 
     recognitionRef.current = recognition;
   }, [autoListen, wakeWordMode]);
 
+  useEffect(() => {
+    if (!visionMode) {
+      stopCamera();
+      if (visionTimerRef.current) {
+        window.clearInterval(visionTimerRef.current);
+        visionTimerRef.current = null;
+      }
+      return;
+    }
+
+    let cancelled = false;
+
+    (async () => {
+      try {
+        await startCamera();
+        if (cancelled) return;
+
+        await analyzeVisionRef.current?.();
+
+        visionTimerRef.current = window.setInterval(() => {
+          analyzeVisionRef.current?.();
+        }, 2500);
+      } catch (error) {
+        setCameraError(error?.message || "Kamera ei käynnistynyt");
+        setStatus("Kamera virhe");
+        setVisionMode(false);
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+
+      if (visionTimerRef.current) {
+        window.clearInterval(visionTimerRef.current);
+        visionTimerRef.current = null;
+      }
+
+      stopCamera();
+    };
+  }, [visionMode]);
+
   const lastAssistant = useMemo(() => {
     return [...messages].reverse().find((m) => m.role === "assistant");
   }, [messages]);
 
+  async function startCamera() {
+    if (cameraStreamRef.current) return cameraStreamRef.current;
+    if (!navigator.mediaDevices?.getUserMedia) {
+      throw new Error("Kameraa ei tueta tässä selaimessa.");
+    }
+
+    const stream = await navigator.mediaDevices.getUserMedia({
+      video: {
+        facingMode: { ideal: "environment" },
+        width: { ideal: 1280 },
+        height: { ideal: 720 },
+      },
+      audio: false,
+    });
+
+    cameraStreamRef.current = stream;
+
+    const video = videoRef.current;
+    if (!video) throw new Error("Videonäkymää ei löytynyt.");
+
+    video.srcObject = stream;
+    video.playsInline = true;
+    video.muted = true;
+
+    await new Promise((resolve) => {
+      video.onloadedmetadata = () => resolve();
+    });
+
+    await video.play();
+    setCameraError("");
+    setStatus("Kamera päällä");
+    return stream;
+  }
+
+  function stopCamera() {
+    const stream = cameraStreamRef.current;
+    if (stream) {
+      stream.getTracks().forEach((track) => track.stop());
+      cameraStreamRef.current = null;
+    }
+
+    const video = videoRef.current;
+    if (video) {
+      video.srcObject = null;
+    }
+  }
+
   function tryStartListening() {
     if (!recognitionRef.current || listeningRef.current) return;
+
     try {
       recognitionRef.current.start();
-    } catch {}
+    } catch {
+      // Ignore start errors from browsers that need a fresh user gesture.
+    }
   }
 
   function toggleListening() {
@@ -230,12 +341,12 @@ export default function Page() {
 
   function clearChat() {
     setMessages([starterMessage]);
-    localStorage.removeItem("glass-agent-chat");
+    localStorage.removeItem("glass-pro-chat");
   }
 
   function clearMemory() {
     setMemory([]);
-    localStorage.removeItem("glass-agent-memory");
+    localStorage.removeItem("glass-pro-memory");
   }
 
   function extractMemoryInstruction(text) {
@@ -244,20 +355,76 @@ export default function Page() {
     return match[2].trim();
   }
 
+  async function captureFrame() {
+    const video = videoRef.current;
+    const canvas = canvasRef.current;
+
+    if (!video || !canvas || !video.videoWidth || !video.videoHeight) {
+      throw new Error("Kamera ei ole valmis.");
+    }
+
+    const maxWidth = 768;
+    const scale = Math.min(1, maxWidth / video.videoWidth);
+    canvas.width = Math.round(video.videoWidth * scale);
+    canvas.height = Math.round(video.videoHeight * scale);
+
+    const ctx = canvas.getContext("2d");
+    if (!ctx) throw new Error("Canvas ei toimi.");
+
+    ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+    return canvas.toDataURL("image/jpeg", 0.7);
+  }
+
+  async function analyzeVision() {
+    if (!visionMode || visionBusyRef.current) return;
+    if (!cameraStreamRef.current) return;
+
+    visionBusyRef.current = true;
+    setStatus("Analysoi kuvaa...");
+
+    try {
+      const image = await captureFrame();
+
+      const res = await fetch("/api/vision", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          image,
+          memory,
+          visionContext: liveVision,
+        }),
+      });
+
+      const data = await res.json();
+      if (!res.ok) throw new Error(data?.error || "Vision-virhe");
+
+      const reply = String(data.reply || "").trim();
+      if (reply) {
+        setLiveVision(reply);
+        setStatus("Kuva analysoitu");
+      }
+    } catch (error) {
+      setCameraError(error?.message || "Vision-analyysi epäonnistui");
+      setStatus("Vision virhe");
+    } finally {
+      visionBusyRef.current = false;
+    }
+  }
+
   async function sendMessage(text) {
     const clean = String(text || "").trim();
     if (!clean || loading) return;
 
     const memoryItem = extractMemoryInstruction(clean);
     if (memoryItem) {
-      const nextMemory = [...memory, memoryItem].slice(-30);
-      setMemory(nextMemory);
+      setMemory((prev) => [...prev, memoryItem].slice(-30));
       setMessages((prev) => [
         ...prev,
         { role: "user", content: clean },
         { role: "assistant", content: `Muistin tämän: ${memoryItem}` },
       ]);
       setInput("");
+
       if (autoSpeak) {
         speak(
           `Muistin tämän: ${memoryItem}`,
@@ -281,15 +448,13 @@ export default function Page() {
         body: JSON.stringify({
           messages: nextMessages,
           memory,
+          visionContext: liveVision,
           autoSpeak,
         }),
       });
 
       const data = await res.json();
-
-      if (!res.ok) {
-        throw new Error(data?.error || "Palvelinvirhe");
-      }
+      if (!res.ok) throw new Error(data?.error || "Palvelinvirhe");
 
       const reply = data.reply || "Ei vastausta.";
       setMessages((prev) => [...prev, { role: "assistant", content: reply }]);
@@ -314,72 +479,87 @@ export default function Page() {
   }
 
   return (
-    <main className={glassMode ? "haloScreen glassModeOn" : "haloScreen"}>
-      <div className="haloGlow haloGlowLeft" />
-      <div className="haloGlow haloGlowRight" />
+    <main className={glassMode ? "glassShell glassModeOn" : "glassShell"}>
+      <div className="glassGlow glassGlowLeft" />
+      <div className="glassGlow glassGlowRight" />
 
-      <section className="haloFrame">
-        <header className="haloTopbar">
-          <div className="haloBrand">
-            <span className="haloDot" />
+      <section className="glassFrame">
+        <header className="glassTopbar">
+          <div className="glassBrand">
+            <span className="glassDot" />
             <div>
-              <div className="haloTitle">GLASS PRO MODE</div>
-              <div className="haloSubtitle">Wake word + voice + memory + agent</div>
+              <div className="glassTitle">VISION MODE</div>
+              <div className="glassSubtitle">camera + voice + memory + agent</div>
             </div>
           </div>
 
-          <div className="haloPills">
-            <span className="haloPill">{status}</span>
-            <span className="haloPill">{loading ? "Lataa" : "Valmis"}</span>
-            <span className="haloPill">{listening ? "Kuuntelee" : "Hiljaa"}</span>
-            <span className="haloPill">{speaking ? "Puhuu" : "Ei puhetta"}</span>
-            <span className="haloPill">Muistoja: {memory.length}</span>
+          <div className="glassPills">
+            <span className="glassPill">{status}</span>
+            <span className="glassPill">{loading ? "Lataa" : "Valmis"}</span>
+            <span className="glassPill">{listening ? "Kuuntelee" : "Hiljaa"}</span>
+            <span className="glassPill">{speaking ? "Puhuu" : "Ei puhetta"}</span>
+            <span className="glassPill">Muistoja: {memory.length}</span>
           </div>
         </header>
 
-        <section className="haloHero">
-          <div className="haloHeroCopy">
-            <p className="haloEyebrow">Smart glasses UI</p>
-            <h1>Lasimainen AI-agentti, joka kuuntelee, muistaa ja vastaa nopeasti</h1>
-            <p className="haloLead">
-              Tämä on rakennettu tuntumaan enemmän oikealta älylasikokemukselta: pieni pinta,
-              suuret toiminnot ja mahdollisimman vähän turhaa säätöä.
+        <section className="glassHero">
+          <div className="glassHeroCopy">
+            <p className="glassEyebrow">Smart glasses UI</p>
+            <h1>AI-agentti, joka kuulee, näkee ja vastaa nopeasti</h1>
+            <p className="glassLead">
+              Tämä on rakennettu tuntumaan enemmän oikealta älylasikokemukselta: kamera,
+              overlay, puhe, muisti ja lyhyet nopeat vastaukset.
             </p>
           </div>
 
-          <div className="haloActions">
-            <button className="haloButton haloButtonSoft" onClick={toggleListening}>
+          <div className="glassActions">
+            <button className="glassButton glassButtonSoft" onClick={toggleListening}>
               {listening ? "Lopeta kuuntelu" : "Puhu"}
             </button>
-            <button className="haloButton haloButtonSoft" onClick={speakLastAssistant}>
+            <button className="glassButton glassButtonSoft" onClick={speakLastAssistant}>
               Lue vastaus
             </button>
-            <button className="haloButton haloButtonGhost" onClick={() => setAutoSpeak((v) => !v)}>
+            <button className="glassButton glassButtonGhost" onClick={() => setAutoSpeak((v) => !v)}>
               Autoääni: {autoSpeak ? "Päällä" : "Pois"}
             </button>
-            <button className="haloButton haloButtonGhost" onClick={() => setAutoListen((v) => !v)}>
+            <button className="glassButton glassButtonGhost" onClick={() => setAutoListen((v) => !v)}>
               Auto kuuntelu: {autoListen ? "Päällä" : "Pois"}
             </button>
-            <button className="haloButton haloButtonGhost" onClick={() => setWakeWordMode((v) => !v)}>
+            <button className="glassButton glassButtonGhost" onClick={() => setWakeWordMode((v) => !v)}>
               Wake word: {wakeWordMode ? "Päällä" : "Pois"}
             </button>
-            <button className="haloButton haloButtonGhost" onClick={() => setGlassMode((v) => !v)}>
-              Glass mode: {glassMode ? "Päällä" : "Pois"}
+            <button className="glassButton glassButtonGhost" onClick={() => setVisionMode((v) => !v)}>
+              Vision: {visionMode ? "Päällä" : "Pois"}
             </button>
-            <button className="haloButton haloButtonGhost" onClick={clearChat}>
+            <button className="glassButton glassButtonGhost" onClick={clearChat}>
               Tyhjennä chat
             </button>
-            <button className="haloButton haloButtonGhost" onClick={clearMemory}>
+            <button className="glassButton glassButtonGhost" onClick={clearMemory}>
               Tyhjennä muisti
             </button>
           </div>
         </section>
 
-        <section className="haloQuickRow">
+        {visionMode && (
+          <section className="visionStage">
+            <video ref={videoRef} className="visionVideo" autoPlay muted playsInline />
+            <div className="visionOverlayTop">
+              {cameraError ? cameraError : "Kamera analysoi kuvaa"}
+            </div>
+            <div className="visionOverlayBottom">
+              <div className="visionLabel">LIVE VISIO</div>
+              <div className="visionText">
+                {liveVision || "Ei analyysiä vielä"}
+              </div>
+            </div>
+          </section>
+        )}
+
+        <section className="glassQuickRow">
           {quickPrompts.map((prompt) => (
             <button
               key={prompt}
-              className="haloQuickChip"
+              className="glassQuickChip"
               onClick={() => sendMessage(prompt)}
               disabled={loading}
             >
@@ -388,31 +568,31 @@ export default function Page() {
           ))}
         </section>
 
-        <section className="haloChatPanel">
-          <div className="haloChatHeader">
+        <section className="glassChatPanel">
+          <div className="glassChatHeader">
             <span>Keskustelu</span>
             <span>{messages.length} viestiä</span>
           </div>
 
-          <div className="haloChatLog">
+          <div className="glassChatLog">
             {messages.map((message, index) => (
               <article
                 key={index}
                 className={
-                  message.role === "user" ? "haloBubble haloBubbleUser" : "haloBubble haloBubbleAi"
+                  message.role === "user" ? "glassBubble glassBubbleUser" : "glassBubble glassBubbleAi"
                 }
               >
-                <div className="haloBubbleTag">
+                <div className="glassBubbleTag">
                   {message.role === "user" ? "SINÄ" : "AI"}
                 </div>
-                <div className="haloBubbleText">{message.content}</div>
+                <div className="glassBubbleText">{message.content}</div>
               </article>
             ))}
 
             {loading && (
-              <article className="haloBubble haloBubbleAi">
-                <div className="haloBubbleTag">AI</div>
-                <div className="haloBubbleText">Ajattelen...</div>
+              <article className="glassBubble glassBubbleAi">
+                <div className="glassBubbleTag">AI</div>
+                <div className="glassBubbleText">Ajattelen...</div>
               </article>
             )}
 
@@ -420,7 +600,7 @@ export default function Page() {
           </div>
 
           <form
-            className="haloComposer"
+            className="glassComposer"
             onSubmit={(e) => {
               e.preventDefault();
               sendMessage(input);
@@ -433,15 +613,20 @@ export default function Page() {
               rows={3}
             />
 
-            <div className="haloComposerRow">
-              <button type="button" className="haloButton haloButtonSoft" onClick={toggleListening}>
+            <div className="glassComposerRow">
+              <button type="button" className="glassButton glassButtonSoft" onClick={toggleListening}>
                 {listening ? "Kuuntelu päällä" : "Mikrofoni"}
               </button>
-              <button type="submit" className="haloButton haloButtonPrimary" disabled={loading}>
+              <button type="submit" className="glassButton glassButtonPrimary" disabled={loading}>
                 Lähetä
+              </button>
+              <button type="button" className="glassButton glassButtonSoft" onClick={analyzeVision}>
+                Analysoi nyt
               </button>
             </div>
           </form>
+
+          <canvas ref={canvasRef} style={{ display: "none" }} />
         </section>
       </section>
     </main>
