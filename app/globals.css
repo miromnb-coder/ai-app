@@ -1,1 +1,340 @@
+* {
+  box-sizing: border-box;
+}
 
+html,
+body {
+  margin: 0;
+  padding: 0;
+  min-height: 100%;
+  background:
+    radial-gradient(circle at top, rgba(99, 102, 241, 0.18), transparent 30%),
+    radial-gradient(circle at bottom right, rgba(56, 189, 248, 0.12), transparent 28%),
+    linear-gradient(180deg, #050816 0%, #0b1020 100%);
+  color: #ecf2ff;
+  font-family: Inter, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+}
+
+button,
+textarea {
+  font: inherit;
+}
+
+.haloScreen {
+  position: relative;
+  min-height: 100vh;
+  overflow: hidden;
+  padding: 16px;
+}
+
+.haloGlow {
+  position: absolute;
+  width: 42vw;
+  height: 42vw;
+  max-width: 560px;
+  max-height: 560px;
+  border-radius: 50%;
+  filter: blur(70px);
+  opacity: 0.24;
+  pointer-events: none;
+}
+
+.haloGlowLeft {
+  left: -12vw;
+  top: -10vw;
+  background: rgba(59, 130, 246, 0.6);
+}
+
+.haloGlowRight {
+  right: -12vw;
+  bottom: -10vw;
+  background: rgba(168, 85, 247, 0.55);
+}
+
+.haloFrame {
+  position: relative;
+  z-index: 1;
+  width: min(980px, 100%);
+  margin: 0 auto;
+  min-height: calc(100vh - 32px);
+  display: grid;
+  grid-template-rows: auto auto auto 1fr;
+  gap: 14px;
+}
+
+.haloTopbar,
+.haloHero,
+.haloChatPanel {
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  background: rgba(10, 15, 30, 0.68);
+  backdrop-filter: blur(18px);
+  box-shadow: 0 24px 80px rgba(0, 0, 0, 0.28);
+}
+
+.haloTopbar {
+  border-radius: 24px;
+  padding: 14px;
+  display: grid;
+  gap: 14px;
+}
+
+.haloBrand {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.haloDot {
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: linear-gradient(135deg, #60a5fa, #a78bfa);
+  box-shadow: 0 0 18px rgba(96, 165, 250, 0.8);
+  flex: 0 0 auto;
+}
+
+.haloTitle {
+  font-size: 0.9rem;
+  font-weight: 700;
+  letter-spacing: 0.14em;
+}
+
+.haloSubtitle {
+  margin-top: 2px;
+  font-size: 0.84rem;
+  color: #aab6d3;
+}
+
+.haloPills {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.haloPill {
+  padding: 8px 11px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.07);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  color: #dbe7ff;
+  font-size: 0.82rem;
+}
+
+.haloHero {
+  border-radius: 24px;
+  padding: 18px;
+  display: grid;
+  gap: 16px;
+}
+
+.haloEyebrow {
+  margin: 0 0 10px;
+  color: #8bb4ff;
+  text-transform: uppercase;
+  letter-spacing: 0.12em;
+  font-size: 0.78rem;
+}
+
+.haloHero h1 {
+  margin: 0;
+  font-size: clamp(1.65rem, 4.8vw, 3.3rem);
+  line-height: 1.04;
+  max-width: 13ch;
+}
+
+.haloLead {
+  margin: 12px 0 0;
+  max-width: 60ch;
+  color: #c5d0ea;
+  line-height: 1.55;
+}
+
+.haloActions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.haloQuickRow {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 10px;
+}
+
+.haloQuickChip {
+  text-align: left;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  background: rgba(255, 255, 255, 0.06);
+  color: #eff4ff;
+  border-radius: 18px;
+  padding: 13px 14px;
+  min-height: 62px;
+  cursor: pointer;
+  transition: transform 0.15s ease, opacity 0.15s ease;
+  line-height: 1.3;
+}
+
+.haloQuickChip:hover,
+.haloButton:hover {
+  transform: translateY(-1px);
+}
+
+.haloQuickChip:disabled,
+.haloButton:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.haloChatPanel {
+  border-radius: 24px;
+  overflow: hidden;
+  display: grid;
+  grid-template-rows: auto 1fr auto;
+  min-height: 52vh;
+}
+
+.haloChatHeader {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 14px 16px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+  color: #b9c8e8;
+  font-size: 0.84rem;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.haloChatLog {
+  padding: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  overflow-y: auto;
+  max-height: 52vh;
+}
+
+.haloBubble {
+  max-width: min(720px, 94%);
+  border-radius: 20px;
+  border: 1px solid rgba(255, 255, 255, 0.09);
+  padding: 14px 15px;
+}
+
+.haloBubbleUser {
+  align-self: flex-end;
+  background: rgba(59, 130, 246, 0.18);
+}
+
+.haloBubbleAi {
+  align-self: flex-start;
+  background: rgba(255, 255, 255, 0.05);
+}
+
+.haloBubbleTag {
+  font-size: 0.72rem;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: #8bb4ff;
+  margin-bottom: 8px;
+}
+
+.haloBubbleText {
+  white-space: pre-wrap;
+  line-height: 1.55;
+  color: #f8fbff;
+}
+
+.haloComposer {
+  padding: 14px;
+  border-top: 1px solid rgba(255, 255, 255, 0.08);
+  display: grid;
+  gap: 10px;
+}
+
+textarea {
+  width: 100%;
+  resize: vertical;
+  min-height: 110px;
+  border-radius: 18px;
+  padding: 14px;
+  color: #f8fbff;
+  background: rgba(3, 7, 20, 0.8);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  outline: none;
+}
+
+textarea:focus {
+  border-color: rgba(96, 165, 250, 0.9);
+  box-shadow: 0 0 0 4px rgba(59, 130, 246, 0.12);
+}
+
+.haloComposerRow {
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.haloButton {
+  border: 0;
+  border-radius: 16px;
+  padding: 13px 15px;
+  color: #eef4ff;
+  cursor: pointer;
+  transition: transform 0.15s ease, opacity 0.15s ease;
+}
+
+.haloButtonSoft {
+  background: rgba(255, 255, 255, 0.08);
+}
+
+.haloButtonGhost {
+  background: rgba(255, 255, 255, 0.04);
+}
+
+.haloButtonPrimary {
+  background: linear-gradient(135deg, #60a5fa, #a78bfa);
+  min-width: 130px;
+}
+
+@media (min-width: 720px) {
+  .haloTopbar {
+    grid-template-columns: auto 1fr;
+    align-items: center;
+  }
+
+  .haloHero {
+    grid-template-columns: 1.2fr 0.8fr;
+    align-items: end;
+  }
+
+  .haloQuickRow {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .haloHeroCopy {
+    padding-right: 12px;
+  }
+}
+
+@media (max-width: 640px) {
+  .haloScreen {
+    padding: 10px;
+  }
+
+  .haloFrame {
+    min-height: calc(100vh - 20px);
+  }
+
+  .haloComposerRow {
+    flex-direction: column;
+  }
+
+  .haloButtonPrimary {
+    width: 100%;
+  }
+
+  .haloBubble {
+    max-width: 100%;
+  }
+}
