@@ -1,10 +1,6 @@
 import { NextResponse } from "next/server";
 import { runAgent } from "../../../lib/agent";
-import {
-  getSessionState,
-  mergeMemory,
-  updateSessionState,
-} from "../../../lib/sessionStore";
+import { getSessionState, mergeMemory, updateSessionState } from "../../../lib/sessionStore";
 
 export async function POST(req) {
   try {
@@ -13,6 +9,7 @@ export async function POST(req) {
     const messages = Array.isArray(body.messages) ? body.messages : [];
     const clientMemory = Array.isArray(body.memory) ? body.memory : [];
     const visionContext = String(body.visionContext || "");
+    const mode = String(body.mode || "ask");
     const autoSpeak = Boolean(body.autoSpeak ?? true);
 
     if (!messages.length) {
@@ -23,7 +20,7 @@ export async function POST(req) {
     const memory = mergeMemory(serverState.memory, clientMemory);
     const effectiveVisionContext = visionContext.trim() || serverState.visionContext || "";
 
-    const result = await runAgent(messages, memory, effectiveVisionContext);
+    const result = await runAgent(messages, memory, effectiveVisionContext, mode);
 
     updateSessionState(sessionId, {
       memory,
