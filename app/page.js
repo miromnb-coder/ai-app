@@ -204,7 +204,60 @@ export default function Page() {
   const batterySaverRef = useRef(false);
   const lastFingerprintRef = useRef(null);
 
-  useEffect(() => {
+useEffect(() => {
+  if (!visionMode) {
+    stopCamera();
+    if (visionTimerRef.current) {
+      window.clearInterval(visionTimerRef.current);
+      visionTimerRef.current = null;
+    }
+    lastFingerprintRef.current = null;
+    setVisionMotion("0.0");
+    return;
+  }
+
+  let cancelled = false;
+
+  (async () => {
+    try {
+      await startCamera();
+      if (cancelled) return;
+
+      await analyzeVisionRef.current?.({
+        force: true,
+        announce: true,
+        visionTask: "describe",
+        instruction: "Kerro mitä näet.",
+      });
+
+      const interval = batterySaver ? 6000 : 1800;
+
+      visionTimerRef.current = window.setInterval(() => {
+        analyzeVisionRef.current?.({
+          force: false,
+          announce: true,
+          visionTask: "describe",
+          instruction: "Kerro mitä näet.",
+        });
+      }, interval);
+    } catch (error) {
+      setCameraError(error?.message || "Kamera ei käynnistynyt");
+      setStatus("Kamera virhe");
+      setVisionMode(false);
+    }
+  })();
+
+  return () => {
+    cancelled = true;
+
+    if (visionTimerRef.current) {
+      window.clearInterval(visionTimerRef.current);
+      visionTimerRef.current = null;
+    }
+
+    stopCamera();
+  };
+}, [visionMode, batterySaver]);
     const savedMessages = localStorage.getItem("glass-pro-chat");
     const savedMemory = localStorage.getItem("glass-pro-memory-v4");
     const savedSettings = localStorage.getItem("glass-pro-settings");
@@ -571,64 +624,73 @@ export default function Page() {
   }
 
   async function analyzeVision({
-    force = false,
-    announce: true
-    visionTask = "describe",
-    instruction = "",
-  } = {}) {
-    if ((!visionMode && !force) || visionBusyRef.current || !cameraStreamRef.current) return;
+  force = false,
+  announce = true,
+  visionTask = "describe",
+  instruction = "",
+} = {}) {
+  if ((!visionMode && !force) || visionBusyRef.current || !cameraStreamRef.current) return;
 
-    visionBusyRef.current = true;
-    setStatus("Analysoi kuvaa...");
+  visionBusyRef.current = true;
+  setStatus("Analysoi kuvaa...");
 
-    try {
-      const { image, fingerprint } = await captureFrameAndFingerprint();
-      const diff = averageDiff(lastFingerprintRef.current || [], fingerprint);
-      setVisionMotion(Number.isFinite(diff) ? diff.toFixed(1) : "0.0");
+  try {
+    const { image, fingerprint } = await captureFrameAndFingerprint();
+    const diff = averageDiff(lastFingerprintRef.current || [], fingerprint);
+    setVisionMotion(Number.isFinite(diff) ? diff.toFixed(1) : "0.0");
 
-      const motionThreshold = batterySaver ? 8.0 : 5.5;
-      if (!force && Number.isFinite(diff) && diff < motionThreshold) {
-        setStatus("Vision idle");
-        return;
-      }
-
-      lastFingerprintRef.current = fingerprint;
-
-      const activeSessionId = ensureSessionId();
-      const response = await fetch("/api/vision", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          image,
-          memory: memoryList.map((x) => x.text),
-          visionContext: liveVision,
-          sessionId: activeSessionId,
-          visionTask,
-          instruction,
-          mode,
-          batterySaver,
-        }),
-      });
-
-      const data = await response.json();
-      if (!response.ok) throw new Error(data?.error || "Vision-virhe");
-
-      const reply = String(data.reply || "").trim();
-      if (reply) {
-        setLiveVision(reply);
-        setStatus("Kuva analysoitu");
-
-        if (announce && autoSpeak) {
-          speakReply(reply);
-        }
-      }
-    } catch (error) {
-      setCameraError(error?.message || "Vision-analyysi epäonnistui");
-      setStatus("Vision virhe");
-    } finally {
-      visionBusyRef.current = false;
+    const motionThreshold = batterySaver ? 8.0 : 5.5;
+    if (!force && Number.isFinite(diff) && diff < motionThreshold) {
+      setStatus("Vision idle");
+      return;
     }
+
+    lastFingerprintRef.current = fingerprint;
+
+    const activeSessionId = ensureSessionId();
+    const response = await fetch("/api/vision", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        image,
+        memory: memoryList.map((x) => x.text),
+        visionContext: liveVision,
+        sessionId: activeSessionId,
+        visionTask,
+        instruction,
+        mode,
+        batterySaver,
+      }),
+    });
+
+    const data = await response.json();
+    if (!response.ok) throw new Error(data?.error || "Vision-virhe");
+
+    const reply = String(data.reply || "").trim();
+
+    if (!reply) {
+      setStatus("Ei vastausta");
+      return;
+    }
+
+    if (reply === liveVision) {
+      setStatus("Sama näkymä, ei päivitystä");
+      return;
+    }
+
+    setLiveVision(reply);
+    setStatus("Kuva analysoitu");
+
+    if (announce && autoSpeak) {
+      speakReply(reply);
+    }
+  } catch (error) {
+    setCameraError(error?.message || "Vision-analyysi epäonnistui");
+    setStatus("Vision virhe");
+  } finally {
+    visionBusyRef.current = false;
   }
+}
 
   function tryStartListening() {
     if (!recognitionRef.current || listeningRef.current) return;
