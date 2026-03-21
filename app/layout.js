@@ -1,8 +1,8 @@
 import "./globals.css";
 
 export const metadata = {
-  title: "Halo Mode AI Agent",
-  description: "Voice-first AI agent for smart glasses and mobile",
+  title: "Halo Glass AI",
+  description: "Voice commands, battery saver, memory and vision for smart glasses-style AI",
 };
 
 export default function RootLayout({ children }) {
