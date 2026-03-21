@@ -1,11 +1,17 @@
 import { NextResponse } from "next/server";
 import { runAgent } from "../../../lib/agent";
+import {
+  getSessionState,
+  mergeMemory,
+  updateSessionState,
+} from "../../../lib/sessionStore";
 
 export async function POST(req) {
   try {
     const body = await req.json();
+    const sessionId = String(body.sessionId || "").trim();
     const messages = Array.isArray(body.messages) ? body.messages : [];
-    const memory = Array.isArray(body.memory) ? body.memory : [];
+    const clientMemory = Array.isArray(body.memory) ? body.memory : [];
     const visionContext = String(body.visionContext || "");
     const autoSpeak = Boolean(body.autoSpeak ?? true);
 
@@ -13,7 +19,17 @@ export async function POST(req) {
       return NextResponse.json({ error: "Messages puuttuu" }, { status: 400 });
     }
 
-    const result = await runAgent(messages, memory, visionContext);
+    const serverState = getSessionState(sessionId);
+    const memory = mergeMemory(serverState.memory, clientMemory);
+    const effectiveVisionContext = visionContext.trim() || serverState.visionContext || "";
+
+    const result = await runAgent(messages, memory, effectiveVisionContext);
+
+    updateSessionState(sessionId, {
+      memory,
+      visionContext: effectiveVisionContext,
+      lastReply: result.reply,
+    });
 
     return NextResponse.json({
       reply: result.reply,
