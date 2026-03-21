@@ -6,13 +6,14 @@ export async function POST(req) {
     const body = await req.json();
     const messages = Array.isArray(body.messages) ? body.messages : [];
     const memory = Array.isArray(body.memory) ? body.memory : [];
+    const visionContext = String(body.visionContext || "");
     const autoSpeak = Boolean(body.autoSpeak ?? true);
 
     if (!messages.length) {
       return NextResponse.json({ error: "Messages puuttuu" }, { status: 400 });
     }
 
-    const result = await runAgent(messages, memory);
+    const result = await runAgent(messages, memory, visionContext);
 
     return NextResponse.json({
       reply: result.reply,
