@@ -1,42 +1,53 @@
 import { NextResponse } from "next/server";
-import { analyzeVisionFrame } from "../../../lib/vision";
-import { getSessionState, mergeMemory, updateSessionState } from "../../../lib/sessionStore";
+import { runAgent } from "../../../lib/agent";
+import { getSessionState, mergeSessionMemory, updateSessionState } from "../../../lib/sessionStore";
+
+function cleanMessages(messages) {
+  return (Array.isArray(messages) ? messages : [])
+    .map((m) => ({
+      role: m.role === "user" ? "user" : "assistant",
+      content: String(m.content || "").trim(),
+    }))
+    .filter((m) => m.content.length > 0);
+}
 
 export async function POST(req) {
   try {
     const body = await req.json();
     const sessionId = String(body.sessionId || "").trim();
-    const image = String(body.image || "");
+    const messages = cleanMessages(body.messages);
     const clientMemory = Array.isArray(body.memory) ? body.memory : [];
     const visionContext = String(body.visionContext || "");
-    const visionTask = String(body.visionTask || "describe");
-    const instruction = String(body.instruction || "");
+    const mode = String(body.mode || "ask");
+    const batterySaver = Boolean(body.batterySaver ?? false);
+    const autoSpeak = Boolean(body.autoSpeak ?? true);
 
-    if (!image) {
-      return NextResponse.json({ error: "Kuva puuttuu" }, { status: 400 });
+    if (!messages.length) {
+      return NextResponse.json({ error: "Messages puuttuu" }, { status: 400 });
     }
 
     const serverState = getSessionState(sessionId);
-    const memory = mergeMemory(serverState.memory, clientMemory);
+    const memory = mergeSessionMemory(serverState.memory, clientMemory);
     const effectiveVisionContext = visionContext.trim() || serverState.visionContext || "";
 
-    const reply = await analyzeVisionFrame({
-      image,
-      memory,
-      visionContext: effectiveVisionContext,
-      visionTask,
-      instruction,
-    });
+    const result = await runAgent(messages, memory, effectiveVisionContext, mode, batterySaver);
 
     updateSessionState(sessionId, {
       memory,
-      visionContext: reply,
+      visionContext: effectiveVisionContext,
+      lastReply: result.reply,
+      mode,
+      batterySaver,
     });
 
-    return NextResponse.json({ reply });
+    return NextResponse.json({
+      reply: result.reply,
+      autoSpeak: result.autoSpeak ?? autoSpeak,
+      toolUsed: result.toolUsed ?? null,
+    });
   } catch (error) {
     return NextResponse.json(
-      { error: error.message || "Vision-virhe" },
+      { error: error.message || "Virhe tapahtui" },
       { status: 500 }
     );
   }
