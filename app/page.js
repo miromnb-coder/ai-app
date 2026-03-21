@@ -5,17 +5,17 @@ import { useEffect, useMemo, useRef, useState } from "react";
 const starterMessage = {
   id: "starter-message",
   role: "assistant",
-  content:
-    "Vision mode on valmis. Voit puhua minulle, kirjoittaa, tai painaa \"Katso ja kysy\".",
+  content: "Vision mode on valmis. Sano komento tai kysy jotain.",
 };
 
 const quickPrompts = [
-  "Muista tämä: tykkään älylaseista",
-  "Laske 48 * 17",
-  "Käännä tämä suomeksi: I want smart glasses with AI",
-  "Anna 3 ideaa älylasisovellukseen",
-  "Mitä muistat minusta?",
-  "Kerro mitä näet kamerassa",
+  "Halo, katso tätä",
+  "Halo, mitä tässä lukee",
+  "Halo, käännä tämä",
+  "Halo, muista tämä: tykkään älylaseista",
+  "Halo, mitä muistat minusta?",
+  "Halo, lue vastaus",
+  "Halo, sammuta kamera",
 ];
 
 const WAKE_WORDS = ["halo", "agentti", "assistant"];
@@ -45,6 +45,11 @@ function speak(text, onStart, onEnd) {
   window.speechSynthesis.speak(utterance);
 }
 
+function makeId(prefix = "msg") {
+  const random = Math.random().toString(36).slice(2, 9);
+  return `${prefix}-${Date.now()}-${random}`;
+}
+
 function stripWakeWord(text) {
   const clean = String(text || "").trim();
   const lower = clean.toLowerCase();
@@ -58,11 +63,6 @@ function stripWakeWord(text) {
   return clean;
 }
 
-function makeId(prefix = "msg") {
-  const random = Math.random().toString(36).slice(2, 9);
-  return `${prefix}-${Date.now()}-${random}`;
-}
-
 function normalizeMessages(list) {
   if (!Array.isArray(list) || !list.length) return [starterMessage];
 
@@ -74,9 +74,7 @@ function normalizeMessages(list) {
 }
 
 function averageDiff(a = [], b = []) {
-  if (!a.length || !b.length || a.length !== b.length) {
-    return Number.POSITIVE_INFINITY;
-  }
+  if (!a.length || !b.length || a.length !== b.length) return Number.POSITIVE_INFINITY;
 
   let total = 0;
   for (let i = 0; i < a.length; i += 1) {
@@ -86,12 +84,77 @@ function averageDiff(a = [], b = []) {
   return total / a.length;
 }
 
+function parseVoiceCommand(text) {
+  const clean = String(text || "").trim();
+  const lower = clean.toLowerCase();
+
+  const memoryMatch = clean.match(/^(muista tämä|remember this)\s*:\s*(.+)$/i);
+  if (memoryMatch) {
+    return { type: "memory", payload: memoryMatch[2].trim() };
+  }
+
+  if (/(sammuta kamera|lopeta kamera|kamera pois)/i.test(clean)) {
+    return { type: "vision_off" };
+  }
+
+  if (/(avaa kamera|kamera päälle|vision päälle|katso ympärille)/i.test(clean)) {
+    return { type: "vision_on" };
+  }
+
+  if (/(katso ja kysy)/i.test(clean)) {
+    return {
+      type: "vision_task",
+      visionTask: "question",
+      instruction: "Vastaa käyttäjän kysymykseen kameran näkymän perusteella.",
+      mode: "vision",
+    };
+  }
+
+  if (/(mitä tässä lukee|lue teksti|lue tämä)/i.test(clean)) {
+    return {
+      type: "vision_task",
+      visionTask: "read_text",
+      instruction: "Lue kuvassa näkyvä teksti.",
+      mode: "vision",
+    };
+  }
+
+  if (/(käännä tämä|käännä se|translate)/i.test(clean)) {
+    return {
+      type: "vision_task",
+      visionTask: "translate",
+      instruction: "Käännä kuvassa näkyvä teksti suomeksi.",
+      mode: "translate",
+    };
+  }
+
+  if (/(mitä näet|mitä tässä on|mikä tämä on|katso tätä)/i.test(clean)) {
+    return {
+      type: "vision_task",
+      visionTask: "describe",
+      instruction: "Kerro lyhyesti mitä kuvassa näkyy.",
+      mode: "vision",
+    };
+  }
+
+  if (/(lue vastaus|toista vastaus)/i.test(clean)) {
+    return { type: "readout" };
+  }
+
+  if (/^tila\s+(kysy|ask)$/i.test(clean)) return { type: "mode", mode: "ask" };
+  if (/^tila\s+(katso|vision)$/i.test(clean)) return { type: "mode", mode: "vision" };
+  if (/^tila\s+(käännä|translate)$/i.test(clean)) return { type: "mode", mode: "translate" };
+  if (/^tila\s+(muisti|memory)$/i.test(clean)) return { type: "mode", mode: "memory" };
+  if (/^tila\s+(ääni|readout)$/i.test(clean)) return { type: "mode", mode: "readout" };
+
+  return { type: "chat", text: clean, mode: "ask" };
+}
+
 export default function Page() {
   const [messages, setMessages] = useState([starterMessage]);
   const [input, setInput] = useState("");
   const [memory, setMemory] = useState([]);
   const [loading, setLoading] = useState(false);
-  const [streaming, setStreaming] = useState(false);
   const [listening, setListening] = useState(false);
   const [speaking, setSpeaking] = useState(false);
   const [status, setStatus] = useState("Valmis");
@@ -100,6 +163,7 @@ export default function Page() {
   const [wakeWordMode, setWakeWordMode] = useState(true);
   const [visionMode, setVisionMode] = useState(false);
   const [glassMode, setGlassMode] = useState(true);
+  const [mode, setMode] = useState("ask");
   const [liveVision, setLiveVision] = useState("");
   const [cameraError, setCameraError] = useState("");
   const [visionMotion, setVisionMotion] = useState("0.0");
@@ -117,7 +181,7 @@ export default function Page() {
   const listeningRef = useRef(false);
   const speakingRef = useRef(false);
   const loadingRef = useRef(false);
-  const streamingRef = useRef(false);
+  const modeRef = useRef("ask");
   const lastFingerprintRef = useRef(null);
 
   useEffect(() => {
@@ -126,6 +190,7 @@ export default function Page() {
     const savedSettings = localStorage.getItem("glass-pro-settings");
     const savedVision = localStorage.getItem("glass-pro-vision");
     const savedSessionId = localStorage.getItem("glass-pro-session-id");
+    const savedMode = localStorage.getItem("glass-pro-mode");
 
     if (savedMessages) {
       try {
@@ -156,9 +221,8 @@ export default function Page() {
       }
     }
 
-    if (savedVision) {
-      setLiveVision(savedVision);
-    }
+    if (savedVision) setLiveVision(savedVision);
+    if (savedMode) setMode(savedMode);
 
     if (savedSessionId) {
       setSessionId(savedSessionId);
@@ -170,9 +234,7 @@ export default function Page() {
   }, []);
 
   useEffect(() => {
-    if (sessionId) {
-      localStorage.setItem("glass-pro-session-id", sessionId);
-    }
+    if (sessionId) localStorage.setItem("glass-pro-session-id", sessionId);
   }, [sessionId]);
 
   useEffect(() => {
@@ -196,12 +258,13 @@ export default function Page() {
   }, [liveVision]);
 
   useEffect(() => {
-    loadingRef.current = loading;
-  }, [loading]);
+    localStorage.setItem("glass-pro-mode", mode);
+    modeRef.current = mode;
+  }, [mode]);
 
   useEffect(() => {
-    streamingRef.current = streaming;
-  }, [streaming]);
+    loadingRef.current = loading;
+  }, [loading]);
 
   useEffect(() => {
     sendMessageRef.current = sendMessage;
@@ -211,9 +274,7 @@ export default function Page() {
   useEffect(() => {
     if (!supportsSpeechRecognition()) return;
 
-    const SpeechRecognition =
-      window.SpeechRecognition || window.webkitSpeechRecognition;
-
+    const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
     const recognition = new SpeechRecognition();
     recognition.lang = "fi-FI";
     recognition.interimResults = false;
@@ -230,12 +291,7 @@ export default function Page() {
       setListening(false);
       setStatus("Valmis");
 
-      if (
-        autoListen &&
-        !speakingRef.current &&
-        !loadingRef.current &&
-        !streamingRef.current
-      ) {
+      if (autoListen && !speakingRef.current && !loadingRef.current) {
         window.setTimeout(() => {
           tryStartListening();
         }, 300);
@@ -259,21 +315,10 @@ export default function Page() {
       const clean = String(transcript).trim();
       if (!clean) return;
 
-      if (wakeWordMode) {
-        const lower = clean.toLowerCase();
-        const hasWakeWord = WAKE_WORDS.some((word) => lower.includes(word));
+      const stripped = wakeWordMode ? stripWakeWord(clean) : clean;
+      if (!stripped) return;
 
-        if (!hasWakeWord) {
-          setInput(clean);
-          return;
-        }
-
-        const stripped = stripWakeWord(clean);
-        if (stripped) sendMessageRef.current?.(stripped);
-        return;
-      }
-
-      sendMessageRef.current?.(clean);
+      handleVoiceInput(stripped);
     };
 
     recognitionRef.current = recognition;
@@ -298,10 +343,20 @@ export default function Page() {
         await startCamera();
         if (cancelled) return;
 
-        await analyzeVisionRef.current?.({ force: true, announce: false });
+        await analyzeVisionRef.current?.({
+          force: true,
+          announce: false,
+          visionTask: "describe",
+          instruction: "Kerro mitä näet.",
+        });
 
         visionTimerRef.current = window.setInterval(() => {
-          analyzeVisionRef.current?.({ force: false, announce: false });
+          analyzeVisionRef.current?.({
+            force: false,
+            announce: false,
+            visionTask: "describe",
+            instruction: "Kerro mitä näet.",
+          });
         }, VISION_INTERVAL_MS);
       } catch (error) {
         setCameraError(error?.message || "Kamera ei käynnistynyt");
@@ -312,12 +367,10 @@ export default function Page() {
 
     return () => {
       cancelled = true;
-
       if (visionTimerRef.current) {
         window.clearInterval(visionTimerRef.current);
         visionTimerRef.current = null;
       }
-
       stopCamera();
     };
   }, [visionMode]);
@@ -344,7 +397,6 @@ export default function Page() {
 
   function speakReply(text) {
     if (!text) return;
-
     speakingRef.current = true;
     setSpeaking(true);
     stopListeningIfActive();
@@ -357,41 +409,6 @@ export default function Page() {
         setSpeaking(false);
       }
     );
-  }
-
-  async function streamAssistantReply(assistantId, reply) {
-    const letters = Array.from(String(reply || ""));
-    if (!letters.length) {
-      setMessages((prev) =>
-        prev.map((message) =>
-          message.id === assistantId ? { ...message, content: "Ei vastausta." } : message
-        )
-      );
-      return;
-    }
-
-    setStreaming(true);
-    setStatus("Vastaa...");
-
-    const chunkSize = letters.length > 160 ? 4 : 2;
-    const delay = letters.length > 200 ? 10 : 14;
-    let index = 0;
-
-    while (index < letters.length) {
-      index = Math.min(letters.length, index + chunkSize);
-      setMessages((prev) =>
-        prev.map((message) =>
-          message.id === assistantId
-            ? { ...message, content: letters.slice(0, index).join("") }
-            : message
-        )
-      );
-      if (index < letters.length) {
-        await new Promise((resolve) => window.setTimeout(resolve, delay));
-      }
-    }
-
-    setStreaming(false);
   }
 
   async function startCamera() {
@@ -494,7 +511,12 @@ export default function Page() {
     return { image, fingerprint };
   }
 
-  async function analyzeVision({ force = false, announce = false } = {}) {
+  async function analyzeVision({
+    force = false,
+    announce = false,
+    visionTask = "describe",
+    instruction = "",
+  } = {}) {
     if ((!visionMode && !force) || visionBusyRef.current || !cameraStreamRef.current) return;
 
     visionBusyRef.current = true;
@@ -521,14 +543,13 @@ export default function Page() {
           memory,
           visionContext: liveVision,
           sessionId: activeSessionId,
+          visionTask,
+          instruction,
         }),
       });
 
       const data = await response.json();
-
-      if (!response.ok) {
-        throw new Error(data?.error || "Vision-virhe");
-      }
+      if (!response.ok) throw new Error(data?.error || "Vision-virhe");
 
       const reply = String(data.reply || "").trim();
       if (reply) {
@@ -588,20 +609,79 @@ export default function Page() {
   }
 
   function triggerLookAndAsk() {
-    if (!visionMode) {
-      setVisionMode(true);
-      window.setTimeout(() => {
-        analyzeVisionRef.current?.({ force: true, announce: true });
-      }, 1300);
+    setVisionMode(true);
+    setMode("vision");
+    window.setTimeout(() => {
+      analyzeVisionRef.current?.({
+        force: true,
+        announce: true,
+        visionTask: "question",
+        instruction: "Kerro mitä näet ja vastaa mahdolliseen käyttäjän kysymykseen.",
+      });
+    }, 1200);
+  }
+
+  async function handleVoiceInput(text) {
+    const command = parseVoiceCommand(text);
+
+    if (command.type === "memory" && command.payload) {
+      const nextMemory = [...memory, command.payload].slice(-30);
+      setMemory(nextMemory);
+      setMode("memory");
+      setMessages((prev) => [
+        ...prev,
+        { id: makeId("user"), role: "user", content: text },
+        { id: makeId("assistant"), role: "assistant", content: `Muistin tämän: ${command.payload}` },
+      ]);
+      if (autoSpeak) speakReply(`Muistin tämän: ${command.payload}`);
       return;
     }
 
-    analyzeVisionRef.current?.({ force: true, announce: true });
+    if (command.type === "vision_off") {
+      setVisionMode(false);
+      setMode("ask");
+      if (autoSpeak) speakReply("Kamera pois.");
+      return;
+    }
+
+    if (command.type === "vision_on") {
+      setVisionMode(true);
+      setMode("vision");
+      if (autoSpeak) speakReply("Kamera päällä.");
+      return;
+    }
+
+    if (command.type === "vision_task") {
+      setVisionMode(true);
+      setMode(command.mode || "vision");
+      analyzeVisionRef.current?.({
+        force: true,
+        announce: true,
+        visionTask: command.visionTask,
+        instruction: command.instruction,
+      });
+      return;
+    }
+
+    if (command.type === "readout") {
+      speakReply(lastAssistant?.content || "");
+      return;
+    }
+
+    if (command.type === "mode") {
+      setMode(command.mode || "ask");
+      if (autoSpeak) {
+        speakReply(`Tila asetettu: ${command.mode || "ask"}`);
+      }
+      return;
+    }
+
+    await sendMessage(text, command.mode || modeRef.current);
   }
 
-  async function sendMessage(text) {
+  async function sendMessage(text, explicitMode = modeRef.current) {
     const clean = String(text || "").trim();
-    if (!clean || loading || streaming) return;
+    if (!clean || loading) return;
 
     const memoryItem = extractMemoryInstruction(clean);
     if (memoryItem) {
@@ -613,10 +693,7 @@ export default function Page() {
         { id: makeId("assistant"), role: "assistant", content: `Muistin tämän: ${memoryItem}` },
       ]);
       setInput("");
-
-      if (autoSpeak) {
-        speakReply(`Muistin tämän: ${memoryItem}`);
-      }
+      if (autoSpeak) speakReply(`Muistin tämän: ${memoryItem}`);
       return;
     }
 
@@ -642,27 +719,26 @@ export default function Page() {
           messages: nextMessages,
           memory,
           visionContext: liveVision,
+          mode: explicitMode,
           autoSpeak,
         }),
       });
 
       const data = await response.json();
-
-      if (!response.ok) {
-        throw new Error(data?.error || "Palvelinvirhe");
-      }
+      if (!response.ok) throw new Error(data?.error || "Palvelinvirhe");
 
       const reply = String(data.reply || "Ei vastausta.").trim();
-      setLoading(false);
-      await streamAssistantReply(assistantId, reply);
+      setMessages((prev) =>
+        prev.map((message) =>
+          message.id === assistantId ? { ...message, content: reply } : message
+        )
+      );
       setStatus("Valmis");
 
       if (autoSpeak && data.autoSpeak !== false) {
         speakReply(reply);
       }
     } catch (error) {
-      setLoading(false);
-      setStreaming(false);
       setMessages((prev) =>
         prev.map((message) =>
           message.id === assistantId
@@ -671,6 +747,8 @@ export default function Page() {
         )
       );
       setStatus("Virhe");
+    } finally {
+      setLoading(false);
     }
   }
 
@@ -687,30 +765,27 @@ export default function Page() {
             <span className="glassDot" />
             <div>
               <div className="glassTitle">VISION MODE</div>
-              <div className="glassSubtitle">camera + voice + memory + agent</div>
+              <div className="glassSubtitle">voice commands + modes + camera</div>
             </div>
           </div>
 
           <div className="glassPills">
             <span className="glassPill">{status}</span>
-            <span className="glassPill">
-              {loading ? "Ajattelee" : streaming ? "Kirjoittaa" : "Valmis"}
-            </span>
+            <span className="glassPill">{mode}</span>
+            <span className="glassPill">{loading ? "Ajattelee" : "Valmis"}</span>
             <span className="glassPill">{listening ? "Kuuntelee" : "Hiljaa"}</span>
             <span className="glassPill">{speaking ? "Puhuu" : "Ei puhetta"}</span>
             <span className="glassPill">Vision {visionMode ? "Päällä" : "Pois"}</span>
             <span className="glassPill">Liike {visionMotion}</span>
-            <span className="glassPill">Muistoja: {memory.length}</span>
           </div>
         </header>
 
         <section className="glassHero">
           <div className="glassHeroCopy">
             <p className="glassEyebrow">Smart glasses UI</p>
-            <h1>AI-agentti, joka kuulee, näkee ja vastaa nopeasti</h1>
+            <h1>AI-agentti, joka kuulee, näkee ja vaihtaa tilaa äänellä</h1>
             <p className="glassLead">
-              Tämä on rakennettu tuntumaan enemmän oikealta älylasikokemukselta: kamera,
-              overlay, puhe, muisti ja lyhyet nopeat vastaukset.
+              Sano komento, vaihda toimintotila ja anna kameran auttaa. Puhelinta tarvitset vain asetuksiin.
             </p>
           </div>
 
@@ -766,8 +841,8 @@ export default function Page() {
             <button
               key={prompt}
               className="glassQuickChip"
-              onClick={() => sendMessage(prompt)}
-              disabled={loading || streaming}
+              onClick={() => handleVoiceInput(prompt.replace(/^halo,\s*/i, ""))}
+              disabled={loading}
             >
               {prompt}
             </button>
@@ -796,7 +871,6 @@ export default function Page() {
                 <div className="glassBubbleText">{message.content}</div>
               </article>
             ))}
-
             <div ref={bottomRef} />
           </div>
 
@@ -818,13 +892,20 @@ export default function Page() {
               <button type="button" className="glassButton glassButtonSoft" onClick={toggleListening}>
                 {listening ? "Kuuntelu päällä" : "Mikrofoni"}
               </button>
-              <button type="submit" className="glassButton glassButtonPrimary" disabled={loading || streaming}>
+              <button type="submit" className="glassButton glassButtonPrimary" disabled={loading}>
                 Lähetä
               </button>
               <button
                 type="button"
                 className="glassButton glassButtonSoft"
-                onClick={() => analyzeVisionRef.current?.({ force: true, announce: true })}
+                onClick={() =>
+                  analyzeVisionRef.current?.({
+                    force: true,
+                    announce: true,
+                    visionTask: "question",
+                    instruction: "Kerro mitä näet ja vastaa käyttäjän mahdolliseen kysymykseen.",
+                  })
+                }
               >
                 Analysoi nyt
               </button>
