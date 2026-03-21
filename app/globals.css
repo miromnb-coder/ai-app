@@ -27,6 +27,10 @@ textarea {
   padding: 16px;
 }
 
+.glassModeOn {
+  opacity: 0.98;
+}
+
 .haloGlow {
   position: absolute;
   width: 42vw;
