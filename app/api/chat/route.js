@@ -6,6 +6,7 @@ export async function POST(req) {
     const body = await req.json();
     const messages = Array.isArray(body.messages) ? body.messages : [];
     const memory = Array.isArray(body.memory) ? body.memory : [];
+    const autoSpeak = Boolean(body.autoSpeak ?? true);
 
     if (!messages.length) {
       return NextResponse.json({ error: "Messages puuttuu" }, { status: 400 });
@@ -15,7 +16,7 @@ export async function POST(req) {
 
     return NextResponse.json({
       reply: result.reply,
-      autoSpeak: result.autoSpeak ?? true,
+      autoSpeak: result.autoSpeak ?? autoSpeak,
       toolUsed: result.toolUsed ?? null,
     });
   } catch (error) {
