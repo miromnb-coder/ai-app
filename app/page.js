@@ -32,7 +32,7 @@ function speak(text, onStart, onEnd) {
 
   window.speechSynthesis.cancel();
 
-  const utterance = new SpeechSynthesisUtterance(text);
+  const utterance = new SpeechSynthesisUtterance(String(text || ""));
   utterance.lang = "fi-FI";
   utterance.rate = 1;
   utterance.pitch = 1;
@@ -45,6 +45,10 @@ function speak(text, onStart, onEnd) {
 
 function makeId(prefix = "msg") {
   return `${prefix}-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
+}
+
+function normalizeText(value) {
+  return String(value || "").replace(/\s+/g, " ").trim();
 }
 
 function normalizeMessages(list) {
@@ -90,10 +94,6 @@ function stripWakeWord(text) {
   }
 
   return clean;
-}
-
-function normalizeText(value) {
-  return String(value || "").replace(/\s+/g, " ").trim();
 }
 
 function createMemoryItem(text, type = "fact", source = "manual") {
@@ -243,8 +243,8 @@ function parseVoiceCommand(text) {
   if (/(mitä näet|mitä tässä on|mikä tämä on|katso tätä)/i.test(clean)) {
     return {
       type: "vision_task",
-      visionTask: "describe",
-      instruction: "Kerro lyhyesti mitä kuvassa näkyy.",
+      visionTask: "summary",
+      instruction: "Tee lyhyt yhteenveto siitä mitä kuvassa näkyy.",
       mode: "vision",
     };
   }
@@ -254,15 +254,6 @@ function parseVoiceCommand(text) {
       type: "vision_task",
       visionTask: "objects",
       instruction: "Tunnista näkyvät tärkeimmät esineet tai objektit lyhyesti.",
-      mode: "vision",
-    };
-  }
-
-  if (/(yhteenveto näkymästä|kerro näkymästä|tiivistä mitä näet)/i.test(clean)) {
-    return {
-      type: "vision_task",
-      visionTask: "summary",
-      instruction: "Tee lyhyt yhteenveto siitä mitä kuvassa näkyy.",
       mode: "vision",
     };
   }
@@ -418,10 +409,12 @@ export default function Page() {
 
   useEffect(() => {
     localStorage.setItem("glass-pro-vision", liveVision);
+    liveVisionRef.current = liveVision;
   }, [liveVision]);
 
   useEffect(() => {
     localStorage.setItem("glass-pro-mode", mode);
+    modeRef.current = mode;
   }, [mode]);
 
   useEffect(() => {
@@ -452,10 +445,6 @@ export default function Page() {
   useEffect(() => {
     batterySaverRef.current = batterySaver;
   }, [batterySaver]);
-
-  useEffect(() => {
-    liveVisionRef.current = liveVision;
-  }, [liveVision]);
 
   useEffect(() => {
     memoryRef.current = memoryList;
@@ -609,9 +598,9 @@ export default function Page() {
     return nextSessionId;
   }
 
-  function stopListeningIfActive() {
+  function stopListeningIfActive({ permanent = false } = {}) {
     if (recognitionRef.current && listeningRef.current) {
-      stopRequestedRef.current = true;
+      if (permanent) stopRequestedRef.current = true;
 
       try {
         recognitionRef.current.stop();
@@ -625,7 +614,7 @@ export default function Page() {
 
     speakingRef.current = true;
     setSpeaking(true);
-    stopListeningIfActive();
+    stopListeningIfActive({ permanent: false });
 
     speak(
       reply,
@@ -646,13 +635,25 @@ export default function Page() {
   function toggleBatterySaver(nextValue) {
     const next =
       typeof nextValue === "boolean" ? nextValue : !batterySaverRef.current;
+
     batterySaverRef.current = next;
     setBatterySaver(next);
   }
 
+  function applyMode(nextMode) {
+    setMode(nextMode);
+
+    if (nextMode === "vision" || nextMode === "translate") {
+      setVisionMode(true);
+    } else {
+      setVisionMode(false);
+    }
+  }
+
   function showMemory() {
-    const items = memoryRef.current;
-    const text = items.length ? memoryToText(items) : "Muisti on tyhjä.";
+    const text = memoryRef.current.length
+      ? memoryToText(memoryRef.current)
+      : "Muisti on tyhjä.";
 
     setMessages((prev) => [
       ...prev,
@@ -668,14 +669,9 @@ export default function Page() {
     localStorage.removeItem("glass-pro-memory-v5");
   }
 
-  function applyMode(nextMode) {
-    setMode(nextMode);
-
-    if (nextMode === "vision" || nextMode === "translate") {
-      setVisionMode(true);
-    } else if (nextMode === "ask") {
-      setVisionMode(false);
-    }
+  function clearChat() {
+    setMessages([starterMessage]);
+    localStorage.removeItem("glass-pro-chat");
   }
 
   function scheduleVisionTask({
@@ -700,6 +696,7 @@ export default function Page() {
 
   async function startCamera() {
     if (cameraStreamRef.current) return cameraStreamRef.current;
+
     if (!navigator.mediaDevices?.getUserMedia) {
       throw new Error("Kameraa ei tueta tässä selaimessa.");
     }
@@ -735,7 +732,6 @@ export default function Page() {
 
   function stopCamera() {
     const stream = cameraStreamRef.current;
-
     if (stream) {
       stream.getTracks().forEach((track) => track.stop());
       cameraStreamRef.current = null;
@@ -767,6 +763,7 @@ export default function Page() {
     if (!ctx) throw new Error("Canvas ei toimi.");
 
     ctx.drawImage(video, 0, 0, width, height);
+
     const image = canvas.toDataURL("image/jpeg", batterySaverRef.current ? 0.55 : 0.72);
     const pixels = ctx.getImageData(0, 0, width, height).data;
 
@@ -900,13 +897,11 @@ export default function Page() {
     tryStartListening();
   }
 
-  function clearChat() {
-    setMessages([starterMessage]);
-    localStorage.removeItem("glass-pro-chat");
-  }
-
   function extractExplicitMemoryText(text) {
-    const match = String(text || "").trim().match(/^(muista tämä|remember this)\s*:\s*(.+)$/i);
+    const match = String(text || "")
+      .trim()
+      .match(/^(muista tämä|remember this)\s*:\s*(.+)$/i);
+
     return match?.[2]?.trim() || "";
   }
 
@@ -1002,16 +997,6 @@ export default function Page() {
     }
   }
 
-  function runVoiceVisionTask({ visionTask, instruction, mode: nextMode }) {
-    scheduleVisionTask({
-      visionTask,
-      instruction,
-      mode: nextMode,
-      announce: true,
-      delay: batterySaverRef.current ? 1000 : 1200,
-    });
-  }
-
   async function handleVoiceInput(text) {
     const command = parseVoiceCommand(text);
 
@@ -1035,7 +1020,16 @@ export default function Page() {
     }
 
     if (command.type === "show_memory") {
-      showMemory();
+      const textToShow = memoryRef.current.length
+        ? memoryToText(memoryRef.current)
+        : "Muisti on tyhjä.";
+
+      setMessages((prev) => [
+        ...prev,
+        { id: makeId("assistant"), role: "assistant", content: textToShow },
+      ]);
+
+      if (autoSpeak) speakReply(textToShow);
       return;
     }
 
@@ -1085,16 +1079,20 @@ export default function Page() {
     if (command.type === "vision_task") {
       setVisionMode(true);
       setMode(command.mode || "vision");
-      runVoiceVisionTask({
+
+      scheduleVisionTask({
         visionTask: command.visionTask,
         instruction: command.instruction,
         mode: command.mode || "vision",
+        announce: true,
+        delay: batterySaverRef.current ? 1000 : 1200,
       });
+
       return;
     }
 
     if (command.type === "readout") {
-      speakReply(messages[messages.length - 1]?.content || "");
+      speakReply(messages.slice().reverse().find((m) => m.role === "assistant")?.content || "");
       return;
     }
 
@@ -1117,10 +1115,11 @@ export default function Page() {
     });
   }
 
-  const lastAssistantText = messages
-    .slice()
-    .reverse()
-    .find((message) => message.role === "assistant")?.content || "";
+  const lastAssistantText =
+    messages
+      .slice()
+      .reverse()
+      .find((message) => message.role === "assistant")?.content || "";
 
   const batteryText = batterySaver ? "Päällä" : "Pois";
 
@@ -1209,7 +1208,9 @@ export default function Page() {
           <section className="vision">
             <video ref={videoRef} className="vision__video" autoPlay muted playsInline />
             <div className="vision__top">
-              {cameraError ? cameraError : `Kamera analysoi kuvaa • liike ${visionMotion} • ${batteryText}`}
+              {cameraError
+                ? cameraError
+                : `Kamera analysoi kuvaa • liike ${visionMotion} • ${batteryText}`}
             </div>
             <div className="vision__bottom">
               <div className="vision__label">LIVE VISIO</div>
