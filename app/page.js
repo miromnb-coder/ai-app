@@ -5,15 +5,18 @@ import { useEffect, useMemo, useRef, useState } from "react";
 const starterMessage = {
   role: "assistant",
   content:
-    "Agent Level 3 on päällä. Voit puhua, kirjoittaa, pyytää minua muistamaan asioita tai käyttää nopeita toimintoja.",
+    "Glass Pro Mode on päällä. Sano “Halo” ja anna komento, tai kirjoita viesti.",
 };
 
-const starterPrompts = [
-  "Laske 48 * 17",
-  "Muista tämä: tykkään älylaseista",
-  "Tiivistä tämä: AI-agentti osaa tehdä asioita itse",
-  "Käännä tämä suomeksi: I want smart glasses with AI",
+const quickPrompts = [
+  "Halo, muista että tykkään älylaseista",
+  "Halo, laske 48 * 17",
+  "Halo, käännä tämä suomeksi: I want smart glasses with AI",
+  "Halo, anna 3 ideaa älylasisovellukseen",
+  "Halo, mitä muistat minusta?",
 ];
+
+const WAKE_WORDS = ["halo", "agentti", "assistant"];
 
 function supportsSpeechRecognition() {
   return (
@@ -38,6 +41,21 @@ function speak(text, onStart, onEnd) {
   window.speechSynthesis.speak(utterance);
 }
 
+function stripWakeWord(text) {
+  const clean = String(text || "").trim();
+  const lower = clean.toLowerCase();
+
+  for (const word of WAKE_WORDS) {
+    const prefix = `${word},`;
+    const prefix2 = `${word} `;
+    if (lower.startsWith(prefix)) return clean.slice(prefix.length).trim();
+    if (lower.startsWith(prefix2)) return clean.slice(prefix2.length).trim();
+    if (lower === word) return "";
+  }
+
+  return clean;
+}
+
 export default function Page() {
   const [messages, setMessages] = useState([starterMessage]);
   const [input, setInput] = useState("");
@@ -46,18 +64,25 @@ export default function Page() {
   const [speaking, setSpeaking] = useState(false);
   const [status, setStatus] = useState("Valmis");
   const [memory, setMemory] = useState([]);
+  const [autoSpeak, setAutoSpeak] = useState(true);
+  const [autoListen, setAutoListen] = useState(true);
+  const [wakeWordMode, setWakeWordMode] = useState(true);
+  const [glassMode, setGlassMode] = useState(true);
+
   const bottomRef = useRef(null);
   const recognitionRef = useRef(null);
+  const listeningRef = useRef(false);
 
   useEffect(() => {
-    const savedMessages = localStorage.getItem("halo-mode-chat");
-    const savedMemory = localStorage.getItem("halo-mode-memory");
+    const savedMessages = localStorage.getItem("glass-agent-chat");
+    const savedMemory = localStorage.getItem("glass-agent-memory");
+    const savedSettings = localStorage.getItem("glass-agent-settings");
 
     if (savedMessages) {
       try {
         setMessages(JSON.parse(savedMessages));
       } catch {
-        localStorage.removeItem("halo-mode-chat");
+        localStorage.removeItem("glass-agent-chat");
       }
     }
 
@@ -65,18 +90,37 @@ export default function Page() {
       try {
         setMemory(JSON.parse(savedMemory));
       } catch {
-        localStorage.removeItem("halo-mode-memory");
+        localStorage.removeItem("glass-agent-memory");
+      }
+    }
+
+    if (savedSettings) {
+      try {
+        const parsed = JSON.parse(savedSettings);
+        if (typeof parsed.autoSpeak === "boolean") setAutoSpeak(parsed.autoSpeak);
+        if (typeof parsed.autoListen === "boolean") setAutoListen(parsed.autoListen);
+        if (typeof parsed.wakeWordMode === "boolean") setWakeWordMode(parsed.wakeWordMode);
+        if (typeof parsed.glassMode === "boolean") setGlassMode(parsed.glassMode);
+      } catch {
+        localStorage.removeItem("glass-agent-settings");
       }
     }
   }, []);
 
   useEffect(() => {
-    localStorage.setItem("halo-mode-chat", JSON.stringify(messages));
+    localStorage.setItem("glass-agent-chat", JSON.stringify(messages));
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages]);
 
   useEffect(() => {
-    localStorage.setItem("halo-mode-memory", JSON.stringify(memory));
+    localStorage.setItem(
+      "glass-agent-settings",
+      JSON.stringify({ autoSpeak, autoListen, wakeWordMode, glassMode })
+    );
+  }, [autoSpeak, autoListen, wakeWordMode, glassMode]);
+
+  useEffect(() => {
+    localStorage.setItem("glass-agent-memory", JSON.stringify(memory));
   }, [memory]);
 
   useEffect(() => {
@@ -91,31 +135,73 @@ export default function Page() {
     recognition.continuous = false;
 
     recognition.onstart = () => {
+      listeningRef.current = true;
       setListening(true);
       setStatus("Kuuntelen...");
     };
 
     recognition.onend = () => {
+      listeningRef.current = false;
       setListening(false);
       setStatus("Valmis");
+
+      if (autoListen) {
+        window.setTimeout(() => {
+          tryStartListening();
+        }, 250);
+      }
     };
 
     recognition.onerror = () => {
+      listeningRef.current = false;
       setListening(false);
-      setStatus("Puheentunnistusvirhe");
+      setStatus("Puhevirhe");
+
+      if (autoListen) {
+        window.setTimeout(() => {
+          tryStartListening();
+        }, 400);
+      }
     };
 
     recognition.onresult = (event) => {
       const transcript = event.results?.[0]?.[0]?.transcript || "";
-      if (transcript.trim()) setInput(transcript.trim());
+      const clean = transcript.trim();
+      if (!clean) return;
+
+      const stripped = wakeWordMode ? stripWakeWord(clean) : clean;
+
+      if (wakeWordMode) {
+        const lower = clean.toLowerCase();
+        const hasWakeWord = WAKE_WORDS.some((word) => lower.includes(word));
+
+        if (!hasWakeWord) {
+          setInput(clean);
+          return;
+        }
+
+        if (stripped) {
+          sendMessage(stripped);
+        }
+        return;
+      }
+
+      sendMessage(stripped);
     };
 
     recognitionRef.current = recognition;
-  }, []);
+  }, [autoListen, wakeWordMode]);
 
   const lastAssistant = useMemo(() => {
     return [...messages].reverse().find((m) => m.role === "assistant");
   }, [messages]);
+
+  function tryStartListening() {
+    if (!recognitionRef.current || listeningRef.current) return;
+    try {
+      recognitionRef.current.start();
+    } catch {}
+  }
 
   function toggleListening() {
     if (!recognitionRef.current) {
@@ -123,12 +209,14 @@ export default function Page() {
       return;
     }
 
-    if (listening) {
-      recognitionRef.current.stop();
+    if (listeningRef.current) {
+      try {
+        recognitionRef.current.stop();
+      } catch {}
       return;
     }
 
-    recognitionRef.current.start();
+    tryStartListening();
   }
 
   function speakLastAssistant() {
@@ -142,12 +230,12 @@ export default function Page() {
 
   function clearChat() {
     setMessages([starterMessage]);
-    localStorage.removeItem("halo-mode-chat");
+    localStorage.removeItem("glass-agent-chat");
   }
 
   function clearMemory() {
     setMemory([]);
-    localStorage.removeItem("halo-mode-memory");
+    localStorage.removeItem("glass-agent-memory");
   }
 
   function extractMemoryInstruction(text) {
@@ -157,23 +245,26 @@ export default function Page() {
   }
 
   async function sendMessage(text) {
-    const clean = text.trim();
+    const clean = String(text || "").trim();
     if (!clean || loading) return;
 
     const memoryItem = extractMemoryInstruction(clean);
     if (memoryItem) {
-      const nextMemory = [...memory, memoryItem].slice(-20);
+      const nextMemory = [...memory, memoryItem].slice(-30);
       setMemory(nextMemory);
       setMessages((prev) => [
         ...prev,
         { role: "user", content: clean },
-        {
-          role: "assistant",
-          content: `Muistin tämän: ${memoryItem}`,
-        },
+        { role: "assistant", content: `Muistin tämän: ${memoryItem}` },
       ]);
       setInput("");
-      speak(`Muistin tämän: ${memoryItem}`, () => setSpeaking(true), () => setSpeaking(false));
+      if (autoSpeak) {
+        speak(
+          `Muistin tämän: ${memoryItem}`,
+          () => setSpeaking(true),
+          () => setSpeaking(false)
+        );
+      }
       return;
     }
 
@@ -190,6 +281,7 @@ export default function Page() {
         body: JSON.stringify({
           messages: nextMessages,
           memory,
+          autoSpeak,
         }),
       });
 
@@ -203,8 +295,12 @@ export default function Page() {
       setMessages((prev) => [...prev, { role: "assistant", content: reply }]);
       setStatus("Valmis");
 
-      if (data.autoSpeak) {
-        speak(reply, () => setSpeaking(true), () => setSpeaking(false));
+      if (autoSpeak && data.autoSpeak !== false) {
+        speak(
+          reply,
+          () => setSpeaking(true),
+          () => setSpeaking(false)
+        );
       }
     } catch (error) {
       setMessages((prev) => [
@@ -218,7 +314,7 @@ export default function Page() {
   }
 
   return (
-    <main className="haloScreen">
+    <main className={glassMode ? "haloScreen glassModeOn" : "haloScreen"}>
       <div className="haloGlow haloGlowLeft" />
       <div className="haloGlow haloGlowRight" />
 
@@ -227,8 +323,8 @@ export default function Page() {
           <div className="haloBrand">
             <span className="haloDot" />
             <div>
-              <div className="haloTitle">AGENT LEVEL 3</div>
-              <div className="haloSubtitle">Voice + memory + glass mode</div>
+              <div className="haloTitle">GLASS PRO MODE</div>
+              <div className="haloSubtitle">Wake word + voice + memory + agent</div>
             </div>
           </div>
 
@@ -244,10 +340,10 @@ export default function Page() {
         <section className="haloHero">
           <div className="haloHeroCopy">
             <p className="haloEyebrow">Smart glasses UI</p>
-            <h1>Puhuva AI-agentti, joka muistaa asioita</h1>
+            <h1>Lasimainen AI-agentti, joka kuuntelee, muistaa ja vastaa nopeasti</h1>
             <p className="haloLead">
-              Tämä versio on jo lähempänä oikeaa älylasikäyttöä: lyhyt näkymä, isot toiminnot,
-              muisti ja puhe molempiin suuntiin.
+              Tämä on rakennettu tuntumaan enemmän oikealta älylasikokemukselta: pieni pinta,
+              suuret toiminnot ja mahdollisimman vähän turhaa säätöä.
             </p>
           </div>
 
@@ -257,6 +353,18 @@ export default function Page() {
             </button>
             <button className="haloButton haloButtonSoft" onClick={speakLastAssistant}>
               Lue vastaus
+            </button>
+            <button className="haloButton haloButtonGhost" onClick={() => setAutoSpeak((v) => !v)}>
+              Autoääni: {autoSpeak ? "Päällä" : "Pois"}
+            </button>
+            <button className="haloButton haloButtonGhost" onClick={() => setAutoListen((v) => !v)}>
+              Auto kuuntelu: {autoListen ? "Päällä" : "Pois"}
+            </button>
+            <button className="haloButton haloButtonGhost" onClick={() => setWakeWordMode((v) => !v)}>
+              Wake word: {wakeWordMode ? "Päällä" : "Pois"}
+            </button>
+            <button className="haloButton haloButtonGhost" onClick={() => setGlassMode((v) => !v)}>
+              Glass mode: {glassMode ? "Päällä" : "Pois"}
             </button>
             <button className="haloButton haloButtonGhost" onClick={clearChat}>
               Tyhjennä chat
@@ -268,7 +376,7 @@ export default function Page() {
         </section>
 
         <section className="haloQuickRow">
-          {starterPrompts.map((prompt) => (
+          {quickPrompts.map((prompt) => (
             <button
               key={prompt}
               className="haloQuickChip"
