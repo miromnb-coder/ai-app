@@ -5,20 +5,22 @@ export async function POST(req) {
   try {
     const body = await req.json();
     const messages = Array.isArray(body.messages) ? body.messages : [];
+    const memory = Array.isArray(body.memory) ? body.memory : [];
 
     if (!messages.length) {
       return NextResponse.json({ error: "Messages puuttuu" }, { status: 400 });
     }
 
-    const result = await runAgent(messages);
+    const result = await runAgent(messages, memory);
 
     return NextResponse.json({
       reply: result.reply,
-      autoSpeak: result.autoSpeak || false,
+      autoSpeak: result.autoSpeak ?? true,
+      toolUsed: result.toolUsed ?? null,
     });
   } catch (error) {
     return NextResponse.json(
-      { error: error.message || "Virhe" },
+      { error: error.message || "Virhe tapahtui" },
       { status: 500 }
     );
   }
