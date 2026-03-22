@@ -724,6 +724,17 @@ export default function Page() {
     });
 
     await video.play();
+
+await new Promise((resolve) => {
+  const check = () => {
+    if (video.videoWidth > 0 && video.videoHeight > 0) {
+      resolve();
+    } else {
+      requestAnimationFrame(check);
+    }
+  };
+  check();
+});
     setCameraError("");
     setStatus("Kamera päällä");
 
